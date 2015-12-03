@@ -11,6 +11,9 @@ import pandas as pd
 import sqlite3
 
 from lastify_v6 import *
+
+user='erblast'
+
 db_path='%s\\test.db' % path
 createDB(db_path)
 con=sqlite3.connect(db_path)
@@ -20,7 +23,7 @@ con=sqlite3.connect(db_path)
 
 for category in ['artist','track','album']:
 
-    chart,attr=get_chart(attr={'category':category},period='overall', limit=10, user='erblast')
+    chart,attr=get_chart(attr={'category':category},period='overall', limit=10, user=user)
     
     enter_chart(con,chart,attr)
 
@@ -44,8 +47,8 @@ mb_cont.start()
 db_lock=threading.Lock()
 
 # create THREADS
-thr_similar_artist=SIMILAR_ARTIST(db_path,'SIMILAR_ARTIST', lastfm_cont, out_cont, db_lock, 'erblast',5, 5000)
-thr_similar_track=SIMILAR_TRACK(db_path,'SIMILAR_TRACK', lastfm_cont, out_cont, db_lock, 'erblast', 5, 5000)
+thr_similar_artist=SIMILAR_ARTIST(db_path,'SIMILAR_ARTIST', lastfm_cont, out_cont, db_lock, user,5, 5000)
+thr_similar_track=SIMILAR_TRACK(db_path,'SIMILAR_TRACK', lastfm_cont, out_cont, db_lock, user, 5, 5000)
 
 thr_toptracks=TOPTRACKS(db_path,'TOPTRACKS', lastfm_cont, out_cont, db_lock, 5, 5000)
 thr_topalbums=TOPALBUMS(db_path,'TOPALBUMS', lastfm_cont, out_cont, db_lock, 5, 5000)
@@ -95,7 +98,7 @@ thr_cont=CONTROLER([thr_spotifyID_album.signal_event, \
                     thr_toptags_artist.signal_event, \
                     thr_toptags_album.signal_event, \
                     thr_toptags_track.signal_event, ], \
-                    f_3,name='THREAD CONTROLER' )
+                    f_3,name='THREAD CONTROLER ALL' )
 
 thr_cont.start()
 
@@ -107,7 +110,7 @@ def f_4():
     thr_topalbums.deactivate()
 
 thr_cont_sim_artist=CONTROLER([thr_similar_artist.signal_event], \
-                    f_4,name='THREAD CONTROLER' )
+                    f_4,name='THREAD CONTROLER TOPTAGS_ARTIST, TOPTRACKS, TOPALBUMS' )
 
 thr_cont_sim_artist.start()
 
@@ -117,10 +120,22 @@ def f_5():
     thr_toptags_album.deactivate()
 
 thr_cont_topalbum=CONTROLER([thr_topalbums.signal_event], \
-                    f_5,name='THREAD CONTROLER' )
+                    f_5,name='THREAD CONTROLER TOPTAGS_ALBUM' )
 
 thr_cont_topalbum.start()
 
+# activate starting threads
+
+thr_similar_artist.activate()
+thr_similar_track.activate()
+thr_toptracks.activate()
+thr_topalbums.activate()
+thr_toptags_artist.activate()
+thr_toptags_album.activate()
+thr_toptags_track.activate()
+thr_mbinfo_album.activate()
+thr_spotifyID_album.activate()
+thr_spotifyID_track.activate()
 
 
 # start threads
@@ -139,15 +154,3 @@ thr_spotifyID_track.start()
 out_cont.start()
 
 
-# activate starting threads
-
-thr_similar_artist.activate()
-thr_similar_track.activate()
-thr_toptracks.activate()
-thr_topalbums.activate()
-thr_toptags_artist.activate()
-thr_toptags_album.activate()
-thr_toptags_track.activate()
-thr_mbinfo_album.activate()
-thr_spotifyID_album.activate()
-thr_spotifyID_track.activate()

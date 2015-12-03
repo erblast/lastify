@@ -13,7 +13,7 @@ def aggr_date_data(con, category, refresh=False, db_lock=threading.RLock()):
         c.execute('DROP TABLE IF EXISTS date_joins_track')
 
         # Creates temporary joined table containing all date data connecting album and tracks
-        c.execute('CREATE  TABLE IF NOT EXISTS date_joins_track AS \
+        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_joins_track AS \
                    SELECT ID_track.trackID, date_album.albumID, date_album.date_int  \
                    FROM ID_track \
                    LEFT JOIN track_rel_album ON track_rel_album.trackID = ID_track.trackID \
@@ -24,11 +24,11 @@ def aggr_date_data(con, category, refresh=False, db_lock=threading.RLock()):
         c.execute('DROP TABLE IF EXISTS date_track')
 
         # Groups and aggregates date_track data in new temporary table, selects first release date of track
-        c.execute('CREATE TABLE IF NOT EXISTS date_track AS \
+        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_track AS \
                    SELECT trackID, MIN(date_int) AS date_int FROM date_joins_track \
                    GROUP BY trackID')
 
-        c.execute('CREATE INDEX track ON date_track (trackID)')
+        c.execute('CREATE INDEX IF NOT EXISTS track ON date_track (trackID)')
 
     if refresh and category=='artist':
 
@@ -36,7 +36,7 @@ def aggr_date_data(con, category, refresh=False, db_lock=threading.RLock()):
         c.execute('DROP TABLE IF EXISTS date_artist')
 
         # Creates temporary joined table containing all date data connecting album and artist + album plays
-        c.execute('CREATE  TABLE IF NOT EXISTS date_joins_artist AS \
+        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_joins_artist AS \
                    SELECT ID_artist.artistID, plays_album.plays, date_album.date_int  \
                    FROM ID_artist \
                    LEFT JOIN ID_album    ON ID_album.artistID   = ID_artist.artistID \
@@ -47,11 +47,11 @@ def aggr_date_data(con, category, refresh=False, db_lock=threading.RLock()):
 
 
         # Groups and aggregates date_artist data in new temporary table. selects release date of most played release
-        c.execute('CREATE TABLE IF NOT EXISTS date_artist AS \
+        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_artist AS \
                    SELECT artistID, date_int, MAX(plays) AS date_int FROM date_joins_artist \
                    GROUP BY artistID')
 
-        c.execute('CREATE INDEX artist ON date_artist (artistID)')
+        c.execute('CREATE INDEX IF NOT EXISTS artist ON date_artist (artistID)')
 
     con.commit()
     db_lock.release()

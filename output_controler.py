@@ -5,7 +5,7 @@ Created on Mon Oct 26 14:00:57 2015
 The output_controler can store strings and prints them at a given frequency
 -create an instance of the output controler
 start the output controler
-create output variable
+create output variable instance
 
 controler.create_outvar()
 

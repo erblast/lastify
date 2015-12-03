@@ -22,7 +22,6 @@ User interface
 #
 #Dataframe functions should be as general as possible
 
-#Import
 
 import time
 import threading
@@ -34,6 +33,17 @@ from createDB import *
 from call_controler_v2 import *
 from output_controler import *
 
+# Global Variables
+
+url='http://ws.audioscrobbler.com/2.0/'
+
+baserequest={'api_key':'43e826d47e1fc381ac3686f374ee34b5','format':'json'}
+
+path=r'd:\Dropbox\work\python\lastify'
+
+sk=str()
+
+secret='e47ef29dda1b81c1f865d12a89ad28b8'
 
 # Errors
 
@@ -192,74 +202,6 @@ def unpackdf(df,ID_col, nested_col):
     return pd.DataFrame(dct)
         
 
-def returnID(con,DF,attr={'category':'artist'}):
-    '''returns a List with IDs, category artist DF= name (can be Series), category track/album 
-    DF=artistID, name'''
-    
-    
-    try:
-        DF=DF.to_frame()
-    except:
-        pass
-
-    if attr['category']=='artist':
-        
-        return [lookup_artistID(con,name) for i,name in DF.itertuples()]
-        
-    if attr['category']=='tag':
-        
-        return [lookup_tagID(con,name) for i,name in DF.itertuples()]
-        
-    if attr['category']=='track':
-        return [lookup_trackID(con,name,artistID) for i,artistID,name \
-                in DF.itertuples()]
-                
-    if attr['category']=='album':
-        return [lookup_albumID(con,name,artistID) for i,artistID,name \
-                in DF.itertuples()]
-
-def addIDcol(con,DF,attr):
-    '''adds ID of item described in attr to DF as columns
-    used if DF contains data related to single item described in attr'''
-
-    
-    artist=attr['artist']
-    artistID=lookup_artistID(con,artist)
-    
-    if attr['category']=='artist' or attr['subcategory']=='artist':
-        ID=artistID
-    
-    if attr['category']=='track' or attr['subcategory']=='track':
-        track=attr['track']
-        ID=lookup_trackID(con,track,artistID)        
-    if attr['category']=='album' or attr['subcategory']=='album':
-        album=attr['album']
-        ID=lookup_albumID(con,album,artistID)        
-        
-    DF['ID']=[ID for i in range(len(DF))]
-    
-    return DF
-            
-#def images2df(nestedImDF):
-#    '''takes charts ['artistID','image'] converts it to DF'''
-#    
-#    newList=[]
-#    
-#    for i,ID,images in nestedImDF.itertuples():
-#        for item in images:
-#            newList.append((ID,item['#text'],item['size']))
-#            
-#    return pd.DataFrame(newList, columns=['artistID','image','size'])       
-
-#def artist2df(nestedartist):
-#    '''takes charts['artist'] converts it to DF '''
-#    
-#    newList=[]
-#    
-#    for i,artist in nestedartist.iteritems():
-#        newList.append((artist['name'],artist['mbid'],artist['url']))
-#            
-#    return pd.DataFrame(newList, columns=['name','mbid','url'])       
 
 #____________________________________________________________________________________
 #Request Functions
@@ -547,9 +489,56 @@ def get_spotifyID(ID,attr={'category':'track','artist':'James Blake','track':'li
         return 'nan'
 #_________________________________________________________________________________       
 # SQLite functions
-# some of the lookup functions will try to find string with a modification in letter case
-# this should be obselete with new database, appopriate fields should be case insensitive
-    
+
+def returnID(con,DF,attr={'category':'artist'}):
+    '''returns a List with IDs, category artist DF= name (can be Series), category track/album
+    DF=artistID, name'''
+
+
+    try:
+        DF=DF.to_frame()
+    except:
+        pass
+
+    if attr['category']=='artist':
+
+        return [lookup_artistID(con,name) for i,name in DF.itertuples()]
+
+    if attr['category']=='tag':
+
+        return [lookup_tagID(con,name) for i,name in DF.itertuples()]
+
+    if attr['category']=='track':
+        return [lookup_trackID(con,name,artistID) for i,artistID,name \
+                in DF.itertuples()]
+
+    if attr['category']=='album':
+        return [lookup_albumID(con,name,artistID) for i,artistID,name \
+                in DF.itertuples()]
+
+def addIDcol(con,DF,attr):
+    '''adds ID of item described in attr to DF as columns
+    used if DF contains data related to single item described in attr'''
+
+
+    artist=attr['artist']
+    artistID=lookup_artistID(con,artist)
+
+    if attr['category']=='artist' or attr['subcategory']=='artist':
+        ID=artistID
+
+    if attr['category']=='track' or attr['subcategory']=='track':
+        track=attr['track']
+        ID=lookup_trackID(con,track,artistID)
+    if attr['category']=='album' or attr['subcategory']=='album':
+        album=attr['album']
+        ID=lookup_albumID(con,album,artistID)
+
+    DF['ID']=[ID for i in range(len(DF))]
+
+    return DF
+
+
 def lookup_userID(con,user):
     '''if user does not exist user will be assigned new ID'''
     c=con.cursor()
@@ -1740,7 +1729,10 @@ def load_spotifyID_album(db_path, lock, call_controler, out, n_entries=500):
             lock.release()
             
         out.save( 'SPOTIFYID_ALBUM \t%.4f\t percent loaded' % (float(i+1)/len(albums)*100))
-        
+
+# Database Maintenance Functions
+#____________________________________________________________________________________________________________________
+
 def calc_interest_score(user, db_path, lock=threading.RLock()):
     '''
     all artist and track items from initial user charts have been used to request 
@@ -2113,18 +2105,7 @@ if __name__ == "__main__":
     from output_controler import *
     
     
-    # Global Variables
-    
-    url='http://ws.audioscrobbler.com/2.0/'
-    
-    baserequest={'api_key':'43e826d47e1fc381ac3686f374ee34b5','format':'json'} 
-    
-    path=r'd:\Dropbox\work\python\lastify'
-    
-    sk=str()
-    
-    secret='e47ef29dda1b81c1f865d12a89ad28b8'
-    
+
     # Database Connection
     
     db_path='%s\\lastify.db' % path
