@@ -44,7 +44,7 @@ mb_cont=call_controler(18,20,out_cont,'musicbrainz controller')
 mb_cont.start()
 
 
-db_lock=threading.Lock()
+db_lock=threading.RLock()
 
 # create THREADS
 thr_similar_artist=SIMILAR_ARTIST(db_path,'SIMILAR_ARTIST', lastfm_cont, out_cont, db_lock, user,5, 5000)

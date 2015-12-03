@@ -20,6 +20,9 @@ What works:
   of data. Indifferent to interruptions of the run, picks up collecting data where interrupted when restarted. Adjust global path 
   variable to existing directory before running
 
+  Recommended database browser:
+  http://sqlitebrowser.org/
+  
 In testing:
   Filter.py Creates and manages different filters to select data from the database. 
 
