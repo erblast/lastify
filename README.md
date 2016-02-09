@@ -25,19 +25,20 @@ Recommended database browser:
 http://sqlitebrowser.org/
   
 To do:
-Add a tag word cloud, a release date graph and a plays vs interest score graph
-	
-Database access can be quite slow for many entries, in the future updating tagfrequency data after adding a tag will be optional
-	
-It will be optional to bypass writer loosing the playlist preview and some sorting functionality
-	
-filtermanager for tracks and albums will be put in two seperate threads, album filtermanager will only be loaded when selected
-	
-Further optimise API calls by creating more subthreads
-	
-Optimise calling to musicbrainz API, server is often busy, when server is busy release dates are currently markes as unavailable
-	
-Optimise release dates and i_score calculations, occasionally there is no release date given for artist but for some of its tracks
-Sometimes there is an i_score for a track but not for the artist
+
+  Add a tag word cloud, a release date graph and a plays vs interest score graph
+
+  Database access can be quite slow for many entries, in the future updating tagfrequency data after adding a tag will be optional
+
+  It will be optional to bypass writer loosing the playlist preview and some sorting functionality
+
+  Filtermanager for tracks and albums will be put in two seperate threads, album filtermanager will only be loaded when selected
+
+  Further optimise API calls by creating more subthreads
+
+  Optimise calling to musicbrainz API, server is often busy, when server is busy release dates are currently markes as unavailable
+
+  Optimise release dates and i_score calculations, occasionally there is no release date given for artist but for some of its
+  tracks. Sometimes there is an i_score for a track but not for the artist
 
 
