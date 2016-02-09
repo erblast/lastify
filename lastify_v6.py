@@ -1861,20 +1861,6 @@ def cleanup_db_dates(db_path, lock=threading.RLock()):
 
     c.executemany('UPDATE date_album SET date_int=? WHERE albumID=?',tup)
 
-    # ii)
-
-    c.execute('CREATE TEMP TABLE IF NOT EXISTS date_joins AS \
-               SELECT track_rel_album.trackID,date_album.albumID,date_album.date_int \
-               FROM track_rel_album\
-               LEFT JOIN date_album ON date_album.albumID = track_rel_album.albumID ')
-
-    c.execute('DROP TABLE IF EXISTS date_track ')
-
-    c.execute('CREATE TABLE date_track AS SELECT main.date_int, main.trackID FROM date_joins AS main\
-                  WHERE main.date_int= ( \
-                                          SELECT min(sub.date_int) FROM date_joins AS sub \
-                                          WHERE sub.trackID=main.trackID \
-                                        )' )
     con.commit()
     lock.release()
 
@@ -1915,9 +1901,9 @@ class LOAD(threading.Thread):
         self.condition_event.clear()
         
     def signal(self):
-        self.signal_event.set()
         self.out.save('%s finished' % self.name)
-        
+        self.signal_event.set()
+
 class RESTART(LOAD):
     '''creates subclass of LOAD overwrting run function for selfrestarting threads'''
 

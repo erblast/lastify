@@ -1,3 +1,7 @@
+
+# Creates and manages several filters and stores filtered track or album IDs in temp_track or temp_album table
+# Creates a view table where filtered IDs are supplemented with data from other tables that might aid in playlist creation
+
 import time
 import threading
 import pandas as pd
@@ -8,10 +12,10 @@ def aggr_date_data(con, category, refresh=False, db_lock=threading.RLock()):
     c=con.cursor()
     db_lock.acquire()
 
-    if refresh and category=='track' or category=='album':
-
+    if refresh and (category=='track' or category=='album'):
         c.execute('DROP TABLE IF EXISTS date_joins_track')
 
+    if category=='track' or category=='album':
         # Creates temporary joined table containing all date data connecting album and tracks
         c.execute('CREATE TEMP TABLE IF NOT EXISTS date_joins_track AS \
                    SELECT ID_track.trackID, date_album.albumID, date_album.date_int  \
@@ -20,38 +24,37 @@ def aggr_date_data(con, category, refresh=False, db_lock=threading.RLock()):
                    LEFT JOIN date_album      ON date_album.albumID      = track_rel_album.albumID ')
 
     if refresh and category=='track':
-
         c.execute('DROP TABLE IF EXISTS date_track')
 
-        # Groups and aggregates date_track data in new temporary table, selects first release date of track
-        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_track AS \
+    if category=='track':
+        # Groups and aggregates date_track data in new table, selects first release date of track
+        c.execute('CREATE TABLE IF NOT EXISTS date_track AS \
                    SELECT trackID, MIN(date_int) AS date_int FROM date_joins_track \
                    GROUP BY trackID')
 
         c.execute('CREATE INDEX IF NOT EXISTS track ON date_track (trackID)')
 
-    if refresh and category=='artist':
-
+    if refresh:
         c.execute('DROP TABLE IF EXISTS date_joins_artist')
         c.execute('DROP TABLE IF EXISTS date_artist')
 
-        # Creates temporary joined table containing all date data connecting album and artist + album plays
-        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_joins_artist AS \
-                   SELECT ID_artist.artistID, plays_album.plays, date_album.date_int  \
-                   FROM ID_artist \
-                   LEFT JOIN ID_album    ON ID_album.artistID   = ID_artist.artistID \
-                   LEFT JOIN date_album  ON date_album.albumID  = ID_album.albumID \
-                   LEFT JOIN plays_album ON plays_album.albumID = ID_album.albumID \
-                   LEFT JOIN ID_user     ON ID_user.userID      = plays_album.userID \
-                   WHERE ID_user.userName = "total" ')
+    # Creates temporary joined table containing all date data connecting album and artist + album plays
+    c.execute('CREATE TEMP TABLE IF NOT EXISTS date_joins_artist AS \
+               SELECT ID_artist.artistID, plays_album.plays, date_album.date_int  \
+               FROM ID_artist \
+               LEFT JOIN ID_album    ON ID_album.artistID   = ID_artist.artistID \
+               LEFT JOIN date_album  ON date_album.albumID  = ID_album.albumID \
+               LEFT JOIN plays_album ON plays_album.albumID = ID_album.albumID \
+               LEFT JOIN ID_user     ON ID_user.userID      = plays_album.userID \
+               WHERE ID_user.userName = "total" ')
 
 
-        # Groups and aggregates date_artist data in new temporary table. selects release date of most played release
-        c.execute('CREATE TEMP TABLE IF NOT EXISTS date_artist AS \
-                   SELECT artistID, date_int, MAX(plays) AS date_int FROM date_joins_artist \
-                   GROUP BY artistID')
+    # Groups and aggregates date_artist data in new table. selects release date of most played release
+    c.execute('CREATE TABLE IF NOT EXISTS date_artist AS \
+               SELECT artistID, date_int, MAX(plays) AS max_plays FROM date_joins_artist \
+               GROUP BY artistID')
 
-        c.execute('CREATE INDEX IF NOT EXISTS artist ON date_artist (artistID)')
+    c.execute('CREATE INDEX IF NOT EXISTS artist ON date_artist (artistID)')
 
     con.commit()
     db_lock.release()
@@ -68,9 +71,10 @@ class FilterManager(object):
 
     """
 
-    def __init__(self, db_path, category='track', thresh=0, db_lock=threading.RLock()):
+    def __init__(self, db_path, user, category='track', thresh=0, db_lock=threading.RLock(), freq_init= True):
         self.db_path = db_path
         self.lock = db_lock
+        self.user = user
         self.category = category
         self.con = sqlite3.connect(db_path)
         self.c = self.con.cursor()
@@ -79,115 +83,103 @@ class FilterManager(object):
         self.filter_log={}
         self.filtered_IDs=pd.DataFrame()
 
-        self.load_unfiltered_IDs()
-        self.feed_table(self.unfiltered_IDs)
+        aggr_date_data(self.con, self.category, refresh= True, db_lock=self.lock)
+
+        self.load_unfiltered_IDs(self.con)
+        self.feed_table(IDs=self.unfiltered_IDs, con= self.con)
         print 'unfiltered IDs loaded'
-        self.freq_tag_init = self.calc_freq_tag(self.thresh)
-        print 'initial tag frequency loaded'
-        self.freq_date_init = self.calc_freq_date()
-        print 'initial date frequency loaded'
+
+        if freq_init:
+            self.freq_tag_init = self.calc_freq_tag(thresh=self.thresh, con= self.con)
+            print 'initial tag frequency loaded'
+            self.freq_date_init = self.calc_freq_date(con= self.con)
+            print 'initial date frequency loaded'
+
+            self.freq_tag_artist_init = self.calc_freq_tag(thresh=self.thresh, artist = True, con=self.con)
+            print 'initial artist tag frequency loaded'
+            self.freq_date_artist_init = self.calc_freq_date( artist = True , con=self.con)
+            print 'initial artist date frequency loaded'
+
 
         self.freq_tag=pd.DataFrame()
+        self.freq_tag_artist = pd.DataFrame()
         self.freq_date=pd.DataFrame()
 
-    def create_table(self):
 
+    def create_table(self, con):
+        c = con.cursor()
         self.lock.acquire()
 
         if self.category == 'track':
-            self.c.execute('CREATE TABLE IF NOT EXISTS temp_track \
+            c.execute('CREATE TABLE IF NOT EXISTS temp_track \
                             (trackID INTEGER PRIMARY KEY)')
 
-            self.c.execute('CREATE VIEW IF NOT EXISTS view_temp_track \
-                            AS SELECT temp_track.trackID, ID_track.trackName, ID_artist.artistName, date_album.date_int,\
-                            plays_track.plays AS plays_track, plays_track.userID AS plays_track_userID, \
-                            plays_artist.plays AS plays_artist, plays_artist.userID AS plays_artist_userID,\
-                            i_score_track.i_score AS i_score_track, i_score_artist.i_score AS i_score_artist,\
-                            date_album.albumID\
-                            FROM temp_track \
-                            LEFT JOIN ID_track ON ID_track.trackID=temp_track.trackID \
-                            LEFT JOIN track_rel_album ON track_rel_album.trackID=temp_track.trackID \
-                            LEFT JOIN date_album ON track_rel_album.albumID=date_album.albumID \
-                            LEFT JOIN ID_artist ON ID_artist.artistID=ID_track.artistID \
-                            LEFT JOIN plays_track ON plays_track.trackID=temp_track.trackID\
-                            LEFT JOIN plays_artist ON ID_track.artistID=plays_artist.artistID \
-                            LEFT JOIN i_score_track ON i_score_track.trackID =temp_track.trackID\
-                            LEFT JOIN i_score_artist ON i_score_artist.artistID=ID_track.artistID'
-                            )
 
         if self.category == 'album':
-            self.c.execute('CREATE TABLE IF NOT EXISTS temp_album \
+            c.execute('CREATE TABLE IF NOT EXISTS temp_album \
                             (albumID INTEGER PRIMARY KEY)')
 
-            self.c.execute('CREATE VIEW IF NOT EXISTS view_temp_album \
-                            AS SELECT temp_album.albumID, ID_album.albumName, ID_artist.artistName, date_album.date_int, \
-                            plays_album.plays AS plays_album, plays_album.userID AS plays_album_userID, \
-                            i_score_artist.i_score AS i_score_artist, plays_artist.plays AS plays_artist, \
-                            plays_artist.userID AS plays_artist_userID \
-                            FROM temp_album \
-                            LEFT JOIN ID_album ON ID_album.albumID=temp_album.albumID \
-                            LEFT JOIN date_album ON temp_album.albumID=date_album.albumID \
-                            LEFT JOIN ID_artist ON ID_artist.artistID=ID_album.artistID \
-                            LEFT JOIN plays_artist ON (ID_album.artistID=plays_artist.artistID AND plays_artist.userID=plays_album.userID)\
-                            LEFT JOIN plays_album ON plays_album.albumID=temp_album.albumID\
-                            LEFT JOIN i_score_artist ON i_score_artist.artistID=ID_album.artistID'
-                            )
+        c.execute('CREATE TABLE IF NOT EXISTS temp_artist \
+                        (artistID INTEGER PRIMARY KEY)')
 
-
-        if self.category == 'artist':
-            self.c.execute('CREATE TABLE IF NOT EXISTS temp_artist \
-                            (artistID INTEGER PRIMARY KEY)')
-        self.con.commit()
+        con.commit()
         self.lock.release()
 
-    def drop_table(self):
+    def drop_table(self, con):
+        c = con.cursor()
+        self.lock.acquire()
+
+        if self.category == 'track':
+            c.execute('DROP TABLE IF EXISTS temp_track ')
+
+        if self.category == 'album':
+            c.execute('DROP TABLE IF EXISTS temp_album ')
+
+        c.execute('DROP TABLE IF EXISTS temp_artist ')
+
+        con.commit()
+        self.lock.release()
+
+    def load_unfiltered_IDs(self, con):
 
         self.lock.acquire()
         if self.category == 'track':
-            self.c.execute('DROP TABLE IF EXISTS temp_track ')
+            DF = pd.read_sql('SELECT trackID FROM ID_track', con)
 
         if self.category == 'album':
-            self.c.execute('DROP TABLE IF EXISTS temp_album ')
+            DF = pd.read_sql('SELECT albumID FROM ID_album', con)
 
-        if self.category == 'artist':
-            self.c.execute('DROP TABLE IF EXISTS temp_artist ')
-
-        self.con.commit()
-        self.lock.release()
-
-    def load_unfiltered_IDs(self):
-
-        self.lock.acquire()
-        if self.category == 'track':
-            DF = pd.read_sql('SELECT trackID FROM ID_track', self.con)
-
-        if self.category == 'album':
-            DF = pd.read_sql('SELECT albumID FROM ID_album', self.con)
-
-        if self.category == 'artist':
-            DF = pd.read_sql('SELECT trackID FROM ID_track', self.con)
         self.lock.release()
 
         self.unfiltered_IDs = [(int(ID),) for i, ID in DF.itertuples()]
 
-    def feed_table(self, IDs):
-
-        assert type(IDs)==list and type(IDs[0])==tuple
-
+    def feed_table(self, IDs, con):
+        c = con.cursor()
         self.lock.acquire()
-        self.drop_table()
-        self.create_table()
+        self.drop_table(con)
+        self.create_table(con)
 
-        if self.category == 'track':
-            self.c.executemany('INSERT OR IGNORE INTO temp_track (trackID) VALUES (?)', IDs)
+        if IDs:
 
-        if self.category == 'album':
-            self.c.executemany('INSERT OR IGNORE INTO temp_album (albumID) VALUES (?)', IDs)
+            assert type(IDs)==list and type(IDs[0])==tuple
 
-        if self.category == 'artist':
-            self.c.executemany('INSERT OR IGNORE INTO temp_artist (artistID) VALUES (?)', IDs)
+            if self.category == 'track':
+                c.executemany('INSERT OR IGNORE INTO temp_track (trackID) VALUES (?)', IDs)
+                c.execute('DROP TABLE temp_artist')
+                c.execute('CREATE TABLE temp_artist AS SELECT ID_track.artistID AS artistID FROM temp_track \
+                                LEFT JOIN ID_track ON ID_track.trackID = temp_track.trackID \
+                                GROUP BY ID_track.artistID')
 
-        self.con.commit()
+            if self.category == 'album':
+                c.executemany('INSERT OR IGNORE INTO temp_album (albumID) VALUES (?)', IDs)
+                c.execute('DROP TABLE temp_artist')
+                c.execute('CREATE TABLE temp_artist AS SELECT ID_album.artistID AS artistID FROM temp_album \
+                                LEFT JOIN ID_album ON ID_album.albumID = temp_album.albumID \
+                                GROUP BY ID_album.artistID')
+
+            c.execute('CREATE INDEX ind_temp_artist ON temp_artist (artistID)')
+
+        con.commit()
         self.lock.release()
 
     def log_filter(self,Filter_instance):
@@ -202,95 +194,107 @@ class FilterManager(object):
         del self.filter_log[Filter_instance.name]
         del Filter_instance
 
-    def update_filterIDs(self):
+    def update_filterIDs(self, con):
+
+        self.filtered_IDs=pd.DataFrame()
+        count=0
 
         for filter in self.filter_log.values():
 
-            if self.filtered_IDs.shape[0]==0:
+            if count==0:
                 self.filtered_IDs=self.filtered_IDs.append(filter.IDs)
 
             else:
                 self.filtered_IDs=pd.merge(self.filtered_IDs, filter.IDs, 'inner',
                                              on=[ self.filtered_IDs.columns[0], filter.IDs.columns[0] ] )
-
+            count+=1
 
         IDs_tup=[(int(ID),) for i,ID in self.filtered_IDs.itertuples()]
 
-        self.feed_table(IDs_tup)
+        self.feed_table(IDs_tup, con)
 
-    def calc_freq_tag(self, thresh):
-
+    def calc_freq_tag(self, con, thresh=0, artist = False):
         self.lock.acquire()
-        if self.category == 'track':
+        if self.category == 'track' :
 
             DF = pd.read_sql('SELECT ID_tag.tagName, COUNT (ID_tag.tagName) AS count, ID_tag.url \
                             FROM tag_track \
                             INNER JOIN temp_track ON temp_track.trackID=tag_track.trackID \
                             LEFT JOIN ID_tag ON ID_tag.tagID=tag_track.tagID \
                             WHERE tag_track.count>=? \
-                            GROUP BY ID_tag.tagID' , self.con, params=(thresh,))
+                            GROUP BY ID_tag.tagID' , con, params=(thresh,))
+
 
         if self.category == 'album':
-            DF = pd.read_sql('SELECT ID_tag.tagName, COUNT (ID_tag.tagName) AS count, ID_tag.url\
+
+            DF = pd.read_sql('SELECT ID_tag.tagName, COUNT (ID_tag.tagName) AS count, ID_tag.url \
                             FROM tag_album \
                             INNER JOIN temp_album ON temp_album.albumID=tag_album.albumID \
                             LEFT JOIN ID_tag ON ID_tag.tagID=tag_album.tagID \
                             WHERE tag_album.count>=? \
-                            GROUP BY ID_tag.tagID' , self.con, params=(thresh,))
+                            GROUP BY ID_tag.tagID' , con, params=(thresh,))
 
-        if self.category == 'artist':
-            DF = pd.read_sql('SELECT ID_tag.tagName, COUNT (ID_tag.tagName) AS count, ID_tag.url\
+        if artist :
+
+            DF = pd.read_sql('SELECT ID_tag.tagName, COUNT (ID_tag.tagName) AS count, ID_tag.url \
                             FROM tag_artist \
                             INNER JOIN temp_artist ON temp_artist.artistID=tag_artist.artistID \
                             LEFT JOIN ID_tag ON ID_tag.tagID=tag_artist.tagID \
                             WHERE tag_artist.count>=? \
-                            GROUP BY ID_tag.tagID' , self.con, params=(thresh,))
+                            GROUP BY ID_tag.tagID' , con, params=(thresh,))
+            self.lock.release()
+            self.freq_tag_artist = DF
+            return DF
+
 
         self.lock.release()
         self.freq_tag=DF
         return DF
 
-    def calc_freq_date(self):
+    def calc_freq_date(self, con, artist=False):
 
         self.lock.acquire()
 
-        c=self.con.cursor()
+        c=con.cursor()
 
-        aggr_date_data(self.con, self.category, self.lock)
+        aggr_date_data(con, self.category, self.lock)
 
         if self.category == 'track':
             DF = pd.read_sql('SELECT date_track.date_int, COUNT(date_track.date_int) as count \
                             FROM temp_track \
                             LEFT JOIN date_track ON date_track.trackID=temp_track.trackID \
-                            GROUP BY date_track.date_int', self.con)
+                            GROUP BY date_track.date_int', con)
+
 
         if self.category == 'album':
             DF = pd.read_sql('SELECT date_album.date_int, COUNT(date_album.date_int) as count \
                             FROM temp_album \
                             LEFT JOIN date_album ON date_album.albumID=temp_album.albumID \
-                            GROUP BY date_album.date_int', self.con)
+                            GROUP BY date_album.date_int', con)
 
-        if self.category == 'artist':
+        if artist:
             DF = pd.read_sql('SELECT date_artist.date_int, COUNT(date_artist.date_int) as count \
                             FROM temp_artist \
-                            LEFT JOIN date_artist  ON date_artist.artistID=temp_artist.artistID \
-                            GROUP BY date_artist.date_int', self.con)
+                            LEFT JOIN date_artist ON date_artist.artistID=temp_artist.artistID \
+                            GROUP BY date_artist.date_int', con)
+
         self.lock.release()
-        self.freq_date=DF['date_int'].value_counts()
-        return DF['date_int'].value_counts()
+        self.freq_date=DF
+        return DF
 
 class Filter(object):
 
-    def __init__(self, name, con, db_lock):
+    def __init__(self, name, db_path, db_lock):
         self.name = name
         self.lock = db_lock
-        self.con=con
+        self.con=sqlite3.connect(db_path)
+        self.IDs=pd.DataFrame()
 
 #FILTER TAGS
 #________________________________________________________________________________________________________________________
 class FilterTrackTag(Filter):
-    def __init__(self, name, tag, thresh, con, db_lock):
-        Filter.__init__(self,name, con, db_lock)
+    def __init__(self, name, tag, thresh, db_path, db_lock):
+        Filter.__init__(self,name, db_path, db_lock)
 
         self.tag = tag
         self.thresh=thresh
@@ -298,11 +302,12 @@ class FilterTrackTag(Filter):
         self.IDs=pd.read_sql('SELECT tag_track.trackID FROM tag_track LEFT JOIN ID_tag ON ID_tag.tagID=tag_track.tagID \
                               WHERE ID_tag.tagName=? AND tag_track.count>=?',self.con, params=(self.tag,self.thresh))
         self.lock.release()
+        self.IDs.columns=['trackID']
 
 class FilterAlbumTag(Filter):
 
-    def __init__(self, name, tag, thresh, con, db_lock):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, tag, thresh, db_path, db_lock):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.tag = tag
         self.thresh=thresh
@@ -310,11 +315,12 @@ class FilterAlbumTag(Filter):
         self.IDs=pd.read_sql('SELECT tag_album.albumID FROM tag_album LEFT JOIN ID_tag ON ID_tag.tagID=tag_album.tagID \
                               WHERE ID_tag.tagName=? AND tag_album.count>=?',self.con, params=(self.tag,self.thresh))
         self.lock.release()
+        self.IDs.columns=['albumID']
 
 class FilterArtistTag(Filter):
 
-    def __init__(self, name, tag, thresh, category, con, db_lock):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, tag, thresh, category, db_path, db_lock):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.tag = tag
         self.thresh=thresh
@@ -330,6 +336,8 @@ class FilterArtistTag(Filter):
                                   WHERE ID_tag.tagName=? AND tag_artist.count>=?',
                                   self.con, params=(self.tag,self.thresh))
 
+            self.IDs.columns=['trackID']
+
         if self.category=='album':
             self.IDs=pd.read_sql('SELECT ID_album.albumID \
                                   FROM tag_artist LEFT JOIN ID_tag ON ID_tag.tagID=tag_artist.tagID \
@@ -337,14 +345,16 @@ class FilterArtistTag(Filter):
                                   WHERE ID_tag.tagName=? AND tag_artist.count>=?',
                                   self.con, params=(self.tag,self.thresh))
 
+            self.IDs.columns=['albumID']
+
         self.lock.release()
 
 #FILTER PLAYS
 #________________________________________________________________________________________________________________________
 class FilterPlaysTrack(Filter):
 
-    def __init__(self, name, user, con, db_lock, minim=None, maxim=None):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, user, db_path, db_lock, minim=None, maxim=None):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.user=user
         self.minim=minim
@@ -358,31 +368,34 @@ class FilterPlaysTrack(Filter):
             self.IDs=pd.read_sql('SELECT ID_track.trackID \
                                   FROM ID_track \
                                   LEFT JOIN plays_track ON plays_track.trackID=ID_track.trackID \
-                                  LEFT JOIN ID_user ON ID_user.userID=plays_track.userID\
+                                  LEFT JOIN ID_user ON ID_user.userID=plays_track.userID \
                                   WHERE ID_user.userName=? AND plays_track.plays>=? AND plays_track.plays<=?',
                                   self.con, params=(self.user, self.minim, self.maxim))
 
         if self.maxim and not self.minim:
-            self.IDs=pd.read_sql('SELECT ID_track.trackID \
+
+            self.IDs=pd.read_sql('SELECT ID_track.trackID AS id \
                                   FROM ID_track \
-                                  LEFT JOIN plays_track ON plays_track.trackID=ID_track.trackID \
-                                  LEFT JOIN ID_user ON ID_user.userID=plays_track.userID\
-                                  WHERE (ID_user.userName=? AND  plays_track.plays<=?) OR ID_user.userName ISNULL',
-                                  self.con, params=(self.user, self.maxim))
+                                  EXCEPT \
+                                        SELECT plays_track.trackID AS id FROM plays_track\
+                                        LEFT JOIN ID_user ON ID_user.userID=plays_track.userID\
+                                        WHERE (ID_user.userName=? AND plays_track.plays>=?)',\
+                                  self.con, params=(self.user, self.maxim ))
 
         if not self.maxim and self.minim:
             self.IDs=pd.read_sql('SELECT ID_track.trackID \
                                   FROM ID_track \
                                   LEFT JOIN plays_track ON plays_track.trackID=ID_track.trackID \
                                   LEFT JOIN ID_user ON ID_user.userID=plays_track.userID\
-                                  WHERE ID_user.userName=? AND plays_track.plays>=? )',
+                                  WHERE ID_user.userName=? AND plays_track.plays>=?' ,
                                   self.con, params=(self.user, self.minim))
         self.lock.release()
+        self.IDs.columns=['trackID']
 
 class FilterPlaysAlbum(Filter):
 
-    def __init__(self, name, user, con, db_lock, minim=None, maxim=None):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, user, db_path, db_lock, minim=None, maxim=None):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.user=user
         self.minim=minim
@@ -403,24 +416,26 @@ class FilterPlaysAlbum(Filter):
         if self.maxim and not self.minim:
             self.IDs=pd.read_sql('SELECT ID_album.albumID \
                                   FROM ID_album \
-                                  LEFT JOIN plays_album ON plays_album.albumID=ID_album.albumID \
-                                  LEFT JOIN ID_user ON ID_user.userID=plays_album.userID\
-                                  WHERE (ID_user.userName=? AND  plays_album.plays<=?) OR ID_user.userName ISNULL',
-                                  self.con, params=(self.user, self.maxim))
+                                  EXCEPT \
+                                        SELECT plays_album.albumID FROM plays_album\
+                                        LEFT JOIN ID_user ON ID_user.userID=plays_album.userID\
+                                        WHERE (ID_user.userName=? AND plays_album.plays>=?)',\
+                                  self.con, params=(self.user, self.maxim ))
 
         if not self.maxim and self.minim:
             self.IDs=pd.read_sql('SELECT ID_album.albumID \
                                   FROM ID_album \
                                   LEFT JOIN plays_album ON plays_album.albumID=ID_album.albumID \
                                   LEFT JOIN ID_user ON ID_user.userID=plays_album.userID\
-                                  WHERE ID_user.userName=? AND plays_album.plays>=? )',
+                                  WHERE ID_user.userName=? AND plays_album.plays>=?' ,
                                   self.con, params=(self.user, self.minim))
         self.lock.release()
+        self.IDs.columns=['albumID']
 
 class FilterPlaysArtist(Filter):
 
-    def __init__(self, name, user, con, db_lock, category, minim=None, maxim=None):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, user, db_path, db_lock, category, minim=None, maxim=None):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.user=user
         self.minim=minim
@@ -447,16 +462,18 @@ class FilterPlaysArtist(Filter):
                                       WHERE ID_user.userName=? AND plays_artist.plays>=? \
                                       AND plays_artist.plays<=?' ,self.con, params=(self.user, self.minim, self.maxim))
 
-
             if self.maxim and not self.minim:
                 self.IDs=pd.read_sql('SELECT ID_track.trackID \
                                       FROM ID_track \
-                                      LEFT JOIN plays_artist ON plays_artist.artistID=ID_track.artistID \
-                                      LEFT JOIN ID_artist ON plays_artist.artistID=ID_artist.artistID \
-                                      LEFT JOIN ID_user ON ID_user.userID=plays_artist.userID \
-                                      WHERE ((ID_user.userName=? AND plays_artist.plays<=? ) OR ID_user.userName ISNULL)\
-                                      AND ID_track.trackID NOTNULL',
-                                      self.con, params=(self.user,  self.maxim))
+                                      EXCEPT \
+                                          SELECT ID_track.trackID \
+                                          FROM ID_track \
+                                          LEFT JOIN plays_artist ON plays_artist.artistID=ID_track.artistID \
+                                          LEFT JOIN ID_artist ON plays_artist.artistID=ID_artist.artistID \
+                                          LEFT JOIN ID_user ON ID_user.userID=plays_artist.userID \
+                                          WHERE (ID_user.userName=? AND plays_artist.plays>=? ) \
+                                          AND ID_track.trackID NOTNULL',\
+                                  self.con, params=(self.user, self.maxim ))
 
             if not self.maxim and self.minim:
                 self.IDs=pd.read_sql('SELECT ID_track.trackID \
@@ -467,6 +484,8 @@ class FilterPlaysArtist(Filter):
                                       WHERE (ID_user.userName=? AND plays_artist.plays>=? ) \
                                       AND ID_track.trackID NOTNULL',
                                       self.con, params=(self.user, self.minim))
+
+            self.IDs.columns=['trackID']
 
         if category=='album':
             if self.maxim and self.minim:
@@ -482,12 +501,15 @@ class FilterPlaysArtist(Filter):
             if self.maxim and not self.minim:
                 self.IDs=pd.read_sql('SELECT ID_album.albumID \
                                       FROM ID_album \
-                                      LEFT JOIN plays_artist ON plays_artist.artistID=ID_album.artistID \
-                                      LEFT JOIN ID_artist ON plays_artist.artistID=ID_artist.artistID \
-                                      LEFT JOIN ID_user ON ID_user.userID=plays_artist.userID \
-                                      WHERE ((ID_user.userName=? AND plays_artist.plays<=? ) OR ID_user.userName ISNULL)\
-                                      AND ID_album.albumID NOTNULL',
-                                      self.con, params=(self.user,  self.maxim))
+                                      EXCEPT \
+                                          SELECT ID_album.albumID \
+                                          FROM ID_album \
+                                          LEFT JOIN plays_artist ON plays_artist.artistID=ID_album.artistID \
+                                          LEFT JOIN ID_artist ON plays_artist.artistID=ID_artist.artistID \
+                                          LEFT JOIN ID_user ON ID_user.userID=plays_artist.userID \
+                                          WHERE (ID_user.userName=? AND plays_artist.plays>=? ) \
+                                          AND ID_album.albumID NOTNULL',\
+                                      self.con, params=(self.user, self.maxim ))
 
             if not self.maxim and self.minim:
                 self.IDs=pd.read_sql('SELECT ID_album.albumID \
@@ -498,14 +520,17 @@ class FilterPlaysArtist(Filter):
                                       WHERE (ID_user.userName=? AND plays_artist.plays>=? ) \
                                       AND ID_album.albumID NOTNULL',
                                       self.con, params=(self.user, self.minim))
+
+            self.IDs.columns=['albumID']
+
         self.lock.release()
 
 #FILTER DATE
 #________________________________________________________________________________________________________________________
 class FilterDateTrack(Filter):
 
-    def __init__(self, name, con, db_lock, minim=0, maxim=time.strftime('%Y', time.localtime()), include_undated=True):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, db_path, db_lock, minim=0, maxim=time.strftime('%Y', time.localtime()), include_undated=False):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.minim=minim
         self.maxim=maxim
@@ -515,9 +540,9 @@ class FilterDateTrack(Filter):
 
         self.lock.acquire()
 
-        c=con.cursor()
+        c=self.con.cursor()
 
-        aggr_date_data(con, 'track', self.lock)
+        aggr_date_data(self.con, 'track', self.lock)
 
         if not include_undated:
             self.IDs = pd.read_sql('SELECT trackID \
@@ -526,18 +551,19 @@ class FilterDateTrack(Filter):
                                     self.con, params=(self.minim, self.maxim))
 
         if include_undated:
-            self.IDs = pd.read_sql('SELECT trackID\
-                                    FROM date_track \
+            self.IDs = pd.read_sql('SELECT ID_track.trackID\
+                                    FROM ID_track \
+                                    LEFT JOIN date_track ON date_track.trackID = ID_track.trackID \
                                     WHERE (date_int>=? AND date_int<=?) \
                                     OR date_int ISNULL',
                                     self.con, params=(self.minim, self.maxim))
-
         self.lock.release()
+        self.IDs.columns=['trackID']
 
 class FilterDateAlbum(Filter):
 
-    def __init__(self, name, con, db_lock, minim=0, maxim=time.strftime('%Y', time.localtime()), include_undated=True):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, db_path, db_lock, minim=0, maxim=time.strftime('%Y', time.localtime()), include_undated=False):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.minim=minim
         self.maxim=maxim
@@ -547,9 +573,8 @@ class FilterDateAlbum(Filter):
 
         self.lock.acquire()
         if not include_undated:
-            self.IDs = pd.read_sql('SELECT ID_album.albumID\
-                                    FROM ID_album \
-                                    INNER JOIN date_album ON date_album.albumID=ID_album.albumID \
+            self.IDs = pd.read_sql('SELECT albumID\
+                                    FROM date_album \
                                     WHERE date_album.date_int>=? AND date_album.date_int<=?',
                                     self.con, params=(self.minim, self.maxim))
 
@@ -562,11 +587,12 @@ class FilterDateAlbum(Filter):
                                     self.con, params=(self.minim, self.maxim))
 
         self.lock.release()
+        self.IDs.columns=['albumID']
 
 class FilterDateArtist(Filter):
 
-    def __init__(self, name, con, db_lock, minim=0, maxim=time.strftime('%Y', time.localtime()), include_undated=True):
-        Filter.__init__(self, name, con, db_lock)
+    def __init__(self, name, db_path, db_lock, category, minim=0, maxim=time.strftime('%Y', time.localtime()), include_undated=False):
+        Filter.__init__(self, name, db_path, db_lock)
 
         self.minim=minim
         self.maxim=maxim
@@ -576,21 +602,46 @@ class FilterDateArtist(Filter):
 
         self.lock.acquire()
 
-        c=con.cursor()
+        c=self.con.cursor()
 
-        aggr_date_data(con, 'artist', self.lock)
+        aggr_date_data(self.con, 'artist', self.lock)
 
-        if not include_undated:
-            self.IDs = pd.read_sql('SELECT artistID \
-                                    FROM artist_track \
-                                    WHERE date_int>=? AND date_int<=?',
-                                    self.con, params=(self.minim, self.maxim))
+        if category=='track':
+            if not include_undated:
+                self.IDs = pd.read_sql('SELECT ID_track.trackID \
+                                        FROM date_artist \
+                                        LEFT JOIN ID_track ON ID_track.artistID = date_artist.artistID \
+                                        WHERE date_int>=? AND date_int<=?',
+                                        self.con, params=(self.minim, self.maxim))
 
-        if include_undated:
-            self.IDs = pd.read_sql('SELECT artistID\
-                                    FROM artist_track \
-                                    WHERE (date_int>=? AND date_int<=?) \
-                                    OR date_int ISNULL',
-                                    self.con, params=(self.minim, self.maxim))
+            if include_undated:
+                self.IDs = pd.read_sql('SELECT ID_track.trackID\
+                                        FROM ID_track \
+                                        LEFT JOIN ID_artist   ON ID_artist.artistID   = ID_track.artistID \
+                                        LEFT JOIN date_artist ON date_artist.artistID = ID_artist.artistID \
+                                        WHERE (date_int>=? AND date_int<=?) \
+                                        OR date_int ISNULL',
+                                        self.con, params=(self.minim, self.maxim))
+
+            self.IDs.columns=['trackID']
+
+        if category=='album':
+            if not include_undated:
+                self.IDs = pd.read_sql('SELECT ID_album.albumID \
+                                        FROM date_artist \
+                                        LEFT JOIN ID_album ON ID_album.artistID = date_artist.artistID \
+                                        WHERE date_int>=? AND date_int<=?',
+                                        self.con, params=(self.minim, self.maxim))
+
+            if include_undated:
+                self.IDs = pd.read_sql('SELECT ID_album.albumID\
+                                        FROM ID_album \
+                                        LEFT JOIN ID_artist   ON ID_artist.artistID   = ID_album.artistID \
+                                        LEFT JOIN date_artist ON date_artist.artistID = ID_artist.artistID \
+                                        WHERE (date_int>=? AND date_int<=?) \
+                                        OR date_int ISNULL',
+                                        self.con, params=(self.minim, self.maxim))
+
+            self.IDs.columns=['albumID']
 
         self.lock.release()

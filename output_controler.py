@@ -48,7 +48,9 @@ class output_controler(threading.Thread):
             
             for i in self.log:
                 try: # simultaneous printing of two threads will result in Value error
+                    i.lock.acquire()
                     print i.out
+                    i.lock.release()
                     
                 except ValueError:
                     pass
@@ -87,10 +89,18 @@ class outvar():
     
     def __init__(self):
         self.out=''
+        self.lock = threading.RLock()
         
     def save(self,text):
+        self.lock.acquire()
         self.out=text
-        
+        self.lock.release()
+
+    def read(self):
+        self.lock.acquire()
+        text = self.out
+        self.lock.release()
+        return text
         
 
     
