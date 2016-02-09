@@ -11,18 +11,20 @@ The programm is in development:
 
 What works:
 
-	Run: Download repository and  go to controler.py set global path variable to desired database location and run in python 2.7.; 
-	this opens a fully functional GUI
+	Run: Download repository and  go to controler.py set global path variable to desired database location and 
+	run in python 2.7.this opens a fully functional GUI
 	  
-	Enter user details and settings press start loading, this will fill up the database, leaving everything at the default setting 
-	loading should finish in 15-30 min
+	Enter user details and settings press start loading, this will fill up the database, leaving everything 
+	at the default setting loading should finish in 15-30 min
 	  
 	Select the filter tab and start adding filters, press 'pass items to writer'
 	  
-	Select the writer tab, adjust sorting parameters and the number of items per artist in playlist. Click on 'write playlist to
-	generate two text files one if a list of all playlist items and one with the spotify code'
+	Select the writer tab, adjust sorting parameters and the number of items per artist in playlist. 
+	Click on 'write playlist to generate two text files one if a list of all playlist items and one 
+	with the spotify code.
 	  
-	Copy spotify code into clipboard and switch to the spotify desktop software. Create a new playlist and paste the spotify code
+	Copy spotify code into clipboard and switch to the spotify desktop software. Create a new playlist and 
+	paste the spotify code
 
 Recommended database browser:
 http://sqlitebrowser.org/
@@ -31,17 +33,20 @@ To do:
 
 	Add a tag word cloud, a release date graph and a plays vs interest score graph
 	
-	Database access can be quite slow for many entries, in the future updating tagfrequency data after adding a tag will be optional
+	Database access can be quite slow for many entries, in the future updating tagfrequency data after 
+	adding a tag will be optional
 	
 	It will be optional to bypass writer loosing the playlist preview and some sorting functionality
 	
-	Filtermanager for tracks and albums will be put in two seperate threads, album filtermanager will only be loaded when selected
+	Filtermanager for tracks and albums will be put in two seperate threads, album filtermanager will 
+	only be loaded when selected
 	
 	Further optimise API calls by creating more subthreads
 	
-	Optimise calling to musicbrainz API, server is often busy, when server is busy release dates are currently markes as unavailable
+	Optimise calling to musicbrainz API, server is often busy, when server is busy release dates are 
+	currently markes as unavailable
 	
-	Optimise release dates and i_score calculations, occasionally there is no release date given for artist but for some of its
-	tracks. Sometimes there is an i_score for a track but not for the artist
+	Optimise release dates and i_score calculations, occasionally there is no release date given for 
+	artist but for some of its tracks. Sometimes there is an i_score for a track but not for the artist
 
 
