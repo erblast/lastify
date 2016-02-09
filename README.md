@@ -10,25 +10,28 @@ unplayed), first release date and interest score (based on similarity links betw
 The programm is in development:
 
 What works:
-  Core section (latify_v6.py, createDB.py, call_controler_v2.py, output_controler). Uses threading, locking to make simultaneous API 
-  requests to three different APIs efficiently maxing out the API request restrictions. Stores all data in a sqllite3 database.
-
-  Run: TEST ALL THREADS in python 2.7 , set global path variable to desired database location, change global variable user to use 
-  different lastfm user account. This creates a small test.db with exemplary data. The run should finish in a few minutes.
+  Run: Download repository and  go to controler.py set global path variable to desired database location and run in python 2.7. ;
+  this opens a fully functional GUI
   
-  Run: lastify_v6.py . Collects a larger set of data from the above mentioned APIs, takes around 48h to complete, collects ca 670 mb 
-  of data. Indifferent to interruptions of the run, picks up collecting data where interrupted when restarted. Adjust global path 
-  variable to existing directory before running
+  Enter user details and settings press start loading, this will fill up the database, leaving everything at the default setting        loading should finish in 15-30 min
+  
+  Select the filter tab and start adding filters, press 'pass items to writer'
+  
+  Select the writer tab, adjust sorting parameters and the number of items per artist in playlist. Click on 'write playlist to          generate two text files one if a list of all playlist items and one with the spotify code'
+  
+  Copy spotify code into clipboard and switch to the spotify desktop software. Create a new playlist and paste the spotify code
 
   Recommended database browser:
   http://sqlitebrowser.org/
   
-In testing:
-  Filter.py Creates and manages different filters to select data from the database. 
-
 To do:
-  Playlist_writer
-  GUI
-
+  Add a tag word cloud, a release date graph and a plays vs interest score graph
+  Database access can be quite slow for many entries, in the future updating tagfrequency data after adding a tag will be optional
+  It will be optional to bypass writer loosing the playlist preview and some sorting functionality
+  filtermanager for tracks and albums will be put in two seperate threads, album filtermanager will only be loaded when selected
+  Further optimise API calls by creating more subthreads
+  Optimise calling to musicbrainz API, server is often busy, when server is busy release dates are currently markes as unavailable
+  Optimise release dates and i_score calculations, occasionally there is no release date given for artist but for some of its tracks
+  Sometimes there is an i_score for a track but not for the artist
 
 
