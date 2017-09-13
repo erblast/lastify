@@ -9,6 +9,9 @@ unplayed), first release date and interest score (based on similarity links betw
 
 The programm is in development:
 
+see wiki for detailed description:
+https://github.com/erblast/lastify/wiki
+
 What works:
 
 	Run: Download repository and  go to controler.py set global path variable to desired database location and 
